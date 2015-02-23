@@ -35,8 +35,10 @@ knit_hooks$set(inline = function(x) {
 
 # Library the required dependencies
 suppressMessages(library(caret, warn.conflicts = FALSE, quietly=TRUE))
+suppressMessages(library(plyr, warn.conflicts = FALSE, quietly=TRUE))
 suppressMessages(library(dplyr, warn.conflicts = FALSE, quietly=TRUE))
 suppressMessages(library(randomForest, warn.conflicts = FALSE, quietly=TRUE))
+suppressMessages(library(gbm, warn.conflicts = FALSE, quietly=TRUE))
 
 #load raw data
 setwd("C:/Users/John/Dropbox/Code/GitHub/ML-coursera")
@@ -87,7 +89,7 @@ testing.part <- training[-training.idx,];
 
 We will try three models: Random forest ("rf"), boosted trees ("gbm") and linear discriminant analysis ("lda"). Based on the accuracy of the predictions, we will choose the optimal.
 
-```{r models}
+```{r model_rf}
 set.seed(222)
 
 # We will try three models: Random forest ("rf"), boosted trees ("gbm") and linear discriminant analysis ("lda").
@@ -95,16 +97,25 @@ train.rf <- train(classe ~ ., method = 'rf' , data = training.part,
              # add tuning par. mtry to avoid long lasting computations for the
              # ideal mtry; take the randomforest dft: sqrt(number of features)
              tuneGrid = data.frame(mtry = floor(sqrt(ncol(training.part)-1)))
-            )   
-train.gbm <-train(classe ~ ., method = 'gbm', data = training.part)
-train.lda <-train(classe ~ ., method = 'lda', data = training.part) 
+            ) 
+```
 
+```{r model_gbm}
+set.seed(200)
+train.gbm <-train(classe ~ ., method = 'gbm', data = training.part)
+```
+
+```{r model_lda}
+train.lda <-train(classe ~ ., method = 'lda', data = training.part) 
+```
+
+```{r models_predict}
 predict.rf <- predict(train.rf  , testing.part)
 predict.gbm<- predict(train.gbm , testing.part)
 predict.lda<- predict(train.lda , testing.part)
 ```
 
-Random forest has an accuracy of `r confusionMatrix(predict.rf, testingPartition$classe)`, boosted trees have an accuracy of `r confusionMatrix(predict.gbm, testingPartition$classe)` and linear discriminant analysis has an accuracy of `r confusionMatrix(predict.lda, testingPartition$classe)`. Therefore we will use the Random Forest model.
+Random forest has an accuracy of `r confusionMatrix(predict.rf, testing.part$classe)$overall['Accuracy']`, boosted trees have an accuracy of `r confusionMatrix(predict.gbm, testing.part$classe)$overall['Accuracy']` and linear discriminant analysis has an accuracy of `r confusionMatrix(predict.lda, testing.part$classe)$overall['Accuracy']`. Therefore we will use the Random Forest model.
 
 ## Tuning with Cross Validation ##
 
