@@ -38,6 +38,7 @@ suppressMessages(library(caret, warn.conflicts = FALSE, quietly=TRUE))
 suppressMessages(library(plyr, warn.conflicts = FALSE, quietly=TRUE))
 suppressMessages(library(dplyr, warn.conflicts = FALSE, quietly=TRUE))
 suppressMessages(library(randomForest, warn.conflicts = FALSE, quietly=TRUE))
+suppressMessages(library(doParallel, warn.conflicts = FALSE, quietly=TRUE))
 
 #load raw data
 setwd("C:/Users/John/Dropbox/Code/GitHub/ML-coursera")
@@ -55,39 +56,19 @@ After examining the data, we have identified a number of actions required to cle
 * There are a few columns where the majority of the values are NA. We will remove columns where there are more than 50% NA values.
 * We will also remove the first 7 columns, as they do not contain measurements.
 * Near zero variance features will be removed.
-* Due to the sheer amount of featured, we will perform PCA to reduce the dimensionality.
+* Due to the sheer amount of featured, we will perform PCA to reduce the dimensionality and cosider the effectiveness of the predictions.
 
 ```{r cleaning}
 # We will remove columns where there are more than 50% NA values.
 na.rich.cols<- apply(training,2,function(x) {sum(is.na(x))});
-training <- training[,which(na.rich.cols <  nrow(training)*0.5)];  
-na.rich.cols<- apply(testing,2,function(x) {sum(is.na(x))});
-testing <- testing[,which(na.rich.cols <  nrow(testing)*0.5)];  
+training <- training[,which(na.rich.cols <  nrow(training)*0.5)];
 
 # We wil also remove the first 7 columns, as they do not contain measurements.
 training<-training[,8:ncol(training)]
-testing<-testing[,8:ncol(testing)]
 
 # Near zero variance features will be removed.
 nz.cols <- nearZeroVar(training, saveMetrics = TRUE)
 training <- training[, nz.cols$nzv==FALSE]
-nz.cols <- nearZeroVar(testing, saveMetrics = TRUE)
-testing <- testing[, nz.cols$nzv==FALSE]
-
-# Due to the sheer amount of featured, we will perform PCA to reduce the dimensionality.
-principal.components <- princomp(training[, -ncol(training)])
-```
-
-From the screeplot below we can see that as few as 5 features account for almost 85% of the variation. Therefore it makes sense to summarize the data instead of using more than 50 features.
-
-```{r pc_plot, cache=FALSE}
-screeplot(principal.components)
-```
-
-With this in mind, we will only keep 10 features for use in creating our models. We will lose some precision, but will gain speed and reduced memory requirements.
-
-```{r cleaning_final}
-training <- training[,append(attributes(principal.components$loadings)$dimnames[[1]][1:10], "classe")]
 ```
 
 ## Creating the Cross Validation set ##
@@ -98,20 +79,24 @@ We will use 75% of the training data set for training our model and the remainin
 
 set.seed(221)
 
-training.idx = createDataPartition(training$classe, p = 3/4, list=FALSE)
+training.idx <- createDataPartition(training$classe, p = 3/4, list=FALSE)
 training.part <- training[training.idx,];
 testing.part <- training[-training.idx,];
+```
 
+```{r pca}
+# Due to the sheer amount of featured, we will perform PCA to reduce the dimensionality.
+principal.components <- preProcess(training.part[, -ncol(training.part)], method=c("BoxCox", "center", "scale", "pca"))
+training.pc <- predict(principal.components, training.part[, -ncol(training.part)])
 ```
 
 ## Model Comparison ##
 
-We will try two models: Random forest ("rf") and linear discriminant analysis ("lda"). Based on the accuracy of the predictions, we will choose the optimal.
+We will try two models (with and without PCA): Random forest ("rf") and linear discriminant analysis ("lda"). Based on the accuracy of the predictions, we will choose the optimal.
 
 ```{r model_rf}
 set.seed(222)
 
-# We will try three models: Random forest ("rf"), boosted trees ("gbm") and linear discriminant analysis ("lda").
 train.rf <- train(classe ~ ., method = 'rf' , data = training.part, 
              # add tuning par. mtry to avoid long lasting computations for the
              # ideal mtry; take the randomforest dft: sqrt(number of features)
@@ -119,16 +104,35 @@ train.rf <- train(classe ~ ., method = 'rf' , data = training.part,
             ) 
 ```
 
+```{r model_rf_pc}
+
+train.rf.pc <- train(training.part$classe ~ ., method = 'rf' , data = training.pc) 
+
+```
+
 ```{r model_lda}
 train.lda <-train(classe ~ ., method = 'lda', data = training.part) 
 ```
 
-```{r models_predict}
-predict.rf <- predict(train.rf  , testing.part)
-predict.lda<- predict(train.lda , testing.part)
+```{r model_lda_pc}
+train.lda.pc <-train(training.part$classe ~ ., method = 'lda', data = training.pc) 
 ```
 
-Random forest has an accuracy of `r round(confusionMatrix(predict.rf, testing.part$classe)$overall['Accuracy'], 3)` and linear discriminant analysis has a (shockingly low) accuracy of `r round(confusionMatrix(predict.lda, testing.part$classe)$overall['Accuracy'], 3)`. Therefore we will use the Random Forest model.
+```{r models_predict}
+predict.rf     <- predict(train.rf             , testing.part)
+predict.rf.pc  <- predict(principal.components , testing.part[, -ncol(training.part)])
+predict.lda    <- predict(train.lda            , testing.part)
+predict.lda.pc <- predict(principal.components , testing.part[, -ncol(training.part)])
+```
+
+Accuracies:
+
+* Random forest: `r round(confusionMatrix(predict.rf, testing.part$classe)$overall['Accuracy'], 3)`
+* Random forest (PCA): `r round(confusionMatrix(testing.part$classe, predict(train.rf.pc, predict.rf.pc))$overall['Accuracy'], 3)`
+* Linear discriminant analysis: `r round(confusionMatrix(predict.lda, testing.part$classe)$overall['Accuracy'], 3)`
+* Linear discriminant analysis (PCA): `r round(confusionMatrix(testing.part$classe, predict(train.lda.pc, predict.lda.pc))$overall['Accuracy'], 3)`
+
+Based on the above, we will use the Random Forest model.
 
 ## Tuning with Cross Validation ##
 
@@ -137,7 +141,7 @@ To avoid over-fitting, we will use cross-validation on the test set created insi
 ```{r cv_tuning}
 set.seed(223)
 
-fit.control <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+fit.control <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
 model.rf.cv <- train(classe ~ ., method="rf",  data=training.part, trControl = fit.control, 
                  # add tuning par. mtry to avoid long lasting computations for the
                  # ideal mtry; take the randomforest dft: sqrt(number of features)
@@ -155,7 +159,7 @@ Tuning proved (marginally) useful, as the accuracy was improved from `r round(co
 predict.final <<- predict(model.rf.cv , testing)
 ```
 
-We will store the predictions on the 'predictions' directory, using the code below:
+We will store the predictions in the working directory, using the code below:
 
 ```{r save_predict}
 answers <- as.vector(predict.final)
