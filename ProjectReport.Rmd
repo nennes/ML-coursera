@@ -1,7 +1,7 @@
 ---
-title: 'Practical Machine Learning Project Report'
-author: 'Ioannis Nennes'
-output: html_document
+title: "Practical Machine Learning Project Report"
+author: "Ioannis Nennes"
+output: pdf_document
 ---
 
 ## Background ##
@@ -38,7 +38,6 @@ suppressMessages(library(caret, warn.conflicts = FALSE, quietly=TRUE))
 suppressMessages(library(plyr, warn.conflicts = FALSE, quietly=TRUE))
 suppressMessages(library(dplyr, warn.conflicts = FALSE, quietly=TRUE))
 suppressMessages(library(randomForest, warn.conflicts = FALSE, quietly=TRUE))
-suppressMessages(library(gbm, warn.conflicts = FALSE, quietly=TRUE))
 
 #load raw data
 setwd("C:/Users/John/Dropbox/Code/GitHub/ML-coursera")
@@ -54,21 +53,41 @@ training$classe <- as.factor(training$classe)
 After examining the data, we have identified a number of actions required to clean the dataset:
 
 * There are a few columns where the majority of the values are NA. We will remove columns where there are more than 50% NA values.
-* We wil also remove the first 7 columns, as they do not contain measurements.
-* Finally, near zero variance features will be removed.
+* We will also remove the first 7 columns, as they do not contain measurements.
+* Near zero variance features will be removed.
+* Due to the sheer amount of featured, we will perform PCA to reduce the dimensionality.
 
 ```{r cleaning}
 # We will remove columns where there are more than 50% NA values.
 na.rich.cols<- apply(training,2,function(x) {sum(is.na(x))});
 training <- training[,which(na.rich.cols <  nrow(training)*0.5)];  
+na.rich.cols<- apply(testing,2,function(x) {sum(is.na(x))});
+testing <- testing[,which(na.rich.cols <  nrow(testing)*0.5)];  
 
 # We wil also remove the first 7 columns, as they do not contain measurements.
 training<-training[,8:ncol(training)]
+testing<-testing[,8:ncol(testing)]
 
-# Finally, near zero variance features will be removed.
+# Near zero variance features will be removed.
 nz.cols <- nearZeroVar(training, saveMetrics = TRUE)
 training <- training[, nz.cols$nzv==FALSE]
+nz.cols <- nearZeroVar(testing, saveMetrics = TRUE)
+testing <- testing[, nz.cols$nzv==FALSE]
 
+# Due to the sheer amount of featured, we will perform PCA to reduce the dimensionality.
+principal.components <- princomp(training[, -ncol(training)])
+```
+
+From the screeplot below we can see that as few as 5 features account for almost 85% of the variation. Therefore it makes sense to summarize the data instead of using more than 50 features.
+
+```{r pc_plot, cache=FALSE}
+screeplot(principal.components)
+```
+
+With this in mind, we will only keep 10 features for use in creating our models. We will lose some precision, but will gain speed and reduced memory requirements.
+
+```{r cleaning_final}
+training <- training[,append(attributes(principal.components$loadings)$dimnames[[1]][1:10], "classe")]
 ```
 
 ## Creating the Cross Validation set ##
@@ -87,7 +106,7 @@ testing.part <- training[-training.idx,];
 
 ## Model Comparison ##
 
-We will try three models: Random forest ("rf"), boosted trees ("gbm") and linear discriminant analysis ("lda"). Based on the accuracy of the predictions, we will choose the optimal.
+We will try two models: Random forest ("rf") and linear discriminant analysis ("lda"). Based on the accuracy of the predictions, we will choose the optimal.
 
 ```{r model_rf}
 set.seed(222)
@@ -100,22 +119,16 @@ train.rf <- train(classe ~ ., method = 'rf' , data = training.part,
             ) 
 ```
 
-```{r model_gbm}
-set.seed(200)
-train.gbm <-train(classe ~ ., method = 'gbm', data = training.part)
-```
-
 ```{r model_lda}
 train.lda <-train(classe ~ ., method = 'lda', data = training.part) 
 ```
 
 ```{r models_predict}
 predict.rf <- predict(train.rf  , testing.part)
-predict.gbm<- predict(train.gbm , testing.part)
 predict.lda<- predict(train.lda , testing.part)
 ```
 
-Random forest has an accuracy of `r confusionMatrix(predict.rf, testing.part$classe)$overall['Accuracy']`, boosted trees have an accuracy of `r confusionMatrix(predict.gbm, testing.part$classe)$overall['Accuracy']` and linear discriminant analysis has an accuracy of `r confusionMatrix(predict.lda, testing.part$classe)$overall['Accuracy']`. Therefore we will use the Random Forest model.
+Random forest has an accuracy of `r round(confusionMatrix(predict.rf, testing.part$classe)$overall['Accuracy'], 3)` and linear discriminant analysis has a (shockingly low) accuracy of `r round(confusionMatrix(predict.lda, testing.part$classe)$overall['Accuracy'], 3)`. Therefore we will use the Random Forest model.
 
 ## Tuning with Cross Validation ##
 
@@ -134,7 +147,7 @@ model.rf.cv <- train(classe ~ ., method="rf",  data=training.part, trControl = f
 predict.rf.cv <<- predict(model.rf.cv , testing.part)
 ```
 
-Tuning proved usefull, as the accuracy was improved from `r ` to `r `.
+Tuning proved (marginally) useful, as the accuracy was improved from `r round(confusionMatrix(predict.rf, testing.part$classe)$overall['Accuracy'], 5)` to `r round(confusionMatrix(predict.rf.cv, testing.part$classe)$overall['Accuracy'], 5)`.
 
 ## Predicting on the test set ##
 
